@@ -346,6 +346,48 @@ python -m pytest test_{api_full_name_underscored}.py -v --tb=short 2>&1 | tee te
 - 确保全部用例 PASSED 或合理 SKIPPED
 - 若存在多个 Python 解释器，**固定使用同一解释器路径**（如 `/usr/bin/python`），避免 NPU 检测结果不一致。
 
+### UT 执行结果报告（强制）
+
+**每次**完成「生成 UT 文件 → 在本机执行 pytest 做检查」后，**必须**再生成一份 **Markdown 报告文件**，便于归档与回归对比；不得只口头汇报结果而不落盘。
+
+**报告落盘路径（二选一，按场景选用）**
+
+| 场景 | 建议路径 |
+|------|----------|
+| 仅本次新生成/改动的**单个 API** UT | `test/{api_full_name_underscored}/UT_REPORT.md` |
+| 本次执行了**整个** `test/` 目录或需统一汇总 | `test/UT_EXECUTION_REPORT.md`（可覆盖更新为最新一次全量结果） |
+| 需保留**历史批次**、不覆盖旧记录 | `test/ut_generation_report_YYYY-MM-DD.md`（或在同目录下按日期追加文件名） |
+
+**报告正文至少包含**
+
+- 生成或执行时间（日期即可）
+- 覆盖范围（单个文件路径或 `pytest` 目标路径）
+- 实际执行的命令（含解释器路径，例如 `/usr/local/python311/bin/python3.11 -m pytest ...`）
+- 结果摘要：`pytest` 汇总行（passed / failed / skipped / warnings、总耗时）
+- 若有失败：失败用例的 nodeid 与**简短**错误原因
+- 若有跳过：建议用 `pytest -rs` 再跑一次补全 skip 原因与 nodeid
+- 退出码（0 / 非 0）
+
+**示例片段（可照抄结构）**
+
+```markdown
+# UT 执行报告
+
+## 执行信息
+- 时间: YYYY-MM-DD
+- 范围: test/{api_full_name_underscored}/...
+- 命令: .../python3.11 -m pytest ... -v --tb=short
+- 退出码: 0
+
+## 结果摘要
+`N passed, M skipped, K warnings in Xs`
+
+## 失败 / 跳过（如有）
+- ...
+```
+
+Agent 在完成 UT 生成与一次可接受的 pytest 检查后，**应直接创建或更新上述 Markdown 文件**，与用户对话中可仅摘要要点并指向该路径。
+
 ### 覆盖率报告
 
 #### Python 实现的 API
@@ -432,6 +474,7 @@ assert work.is_completed()
 - [ ] 进程组正确 init/destroy
 - [ ] 端口使用动态分配
 - [ ] 如环境可执行，已跑通测试并生成覆盖率报告
+- [ ] **已生成 UT 执行结果报告**（Markdown，路径符合「UT 执行结果报告」小节约定，含命令与 passed/failed/skipped 摘要）
 - [ ] 在 NPU 可用环境下，NPU 路径用例占比 >= 70%
 
 ## 参考路径
