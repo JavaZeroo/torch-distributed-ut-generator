@@ -9,25 +9,22 @@
 API 名称：torch.distributed.all_reduce
 API 签名：all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False)
 
-覆盖维度：
-+------------------+----------------------------------------+
-| 维度             | 覆盖值                                 |
-+------------------+----------------------------------------+
-| tensor dtype     | float32, bfloat16                      |
-| async_op         | True, False                            |
-| op (ReduceOp)    | SUM, AVG, MAX, MIN, PRODUCT            |
-| group            | 默认组(WORLD), 自定义子组              |
-| tensor shape     | [4,4], [1], [0], [1024,1024]           |
-| 连续调用         | 3次连续 all_reduce                     |
-| 异常: 非Tensor   | 传入字符串                             |
-| 异常: 错误device | CPU tensor + NCCL/HCCL backend         |
-+------------------+----------------------------------------+
+覆盖维度表：
+| 覆盖维度         | 说明                                                         | 覆盖情况                                       |
+|------------------|--------------------------------------------------------------|------------------------------------------------|
+| 空/非空          | group 可为 None；其余参数取默认与显式传入                    | 已覆盖：group=None；默认参数 all_reduce(tensor) |
+| 枚举选项         | ReduceOp：SUM、MAX、MIN、PRODUCT、AVG 等                     | 已覆盖：多种 op；未覆盖 BAND/BOR/BXOR（见未覆盖项） |
+| 参数类型         | Tensor、ReduceOp、ProcessGroup、bool(async_op)               | 已覆盖                                         |
+| 传参与不传参     | op/group/async_op 显式传参与省略                             | 已覆盖                                         |
+| 等价类/边界值    | 1D/标量/大 tensor、连续调用、bfloat16/float32                | 已覆盖                                         |
+| 正常传参场景     | 合法输入下集合通信完成、shape/dtype 保持                      | 已覆盖：sync/async、自定义子组                 |
+| 异常传参场景     | 非 Tensor；CPU tensor + NCCL/HCCL                             | 已覆盖：非 Tensor；CPU tensor（非 gloo 后端时） |
 
 未覆盖项及原因：
-- float16: NPU HCCL 对 float16 集合通信支持不稳定，易干扰功能验证
-- BAND/BOR/BXOR: HCCL 后端不支持位运算 ReduceOp
-- int8/uint8: all_reduce 对整型支持因后端而异，非核心测试场景
-- PREMUL_SUM: 仅 NCCL 支持，NPU 不支持
+- BAND/BOR/BXOR：HCCL 后端不支持位运算 ReduceOp
+- int8/uint8：整型 all_reduce 因后端而异，非本 UT 核心
+- PREMUL_SUM：仅部分 NCCL 构建支持，NPU 环境通常不涉及
+- float16：精度验证非本测试目的（与 bfloat16 功能覆盖不冲突）
 
 注意：本测试仅验证功能正确性（调用不报错、输出 shape/dtype 符合预期），
      不做精度和数值正确性校验。
