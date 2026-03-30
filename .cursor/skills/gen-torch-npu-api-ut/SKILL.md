@@ -23,7 +23,14 @@ description: >-
 - 使用 **`unittest`**：**禁止** `pytest` 全系 API（含 `pytest.mark`、`pytest.raises`、`pytest.skip`、`pytest.fixture`、`pytest.parametrize` 等）。
 - 测试类**继承 `TestCase`**；测试方法名为 `test_*`。
 - 优先使用 `from torch_npu.testing.testcase import TestCase, run_tests`；若需与 ascend 部分文件一致，可对照同目录是否使用 `torch.testing._internal.common_utils.TestCase`（以**目标目录最近邻**用例为准）。
-- 多卡用例：在**确有需要**（语义依赖多 rank / 多设备）时，对 **≥2 块 NPU** 的测试方法使用 **`@skipIfUnsupportMultiNPU(n)`**（`from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU`），与 ascend 一致。**`torch.distributed` 下 API** 须先按 [DISTRIBUTED_API_UT.md](DISTRIBUTED_API_UT.md) 判断是否要写多卡用例，勿默认全写多卡。
+- **设备检查统一放在 `setUp` 中**：使用 `torch._C._get_privateuse1_backend_name()` 检查设备类型，如果不是 `'npu'` 直接报错（`self.assertEqual` 或 `raise AssertionError`），**不要 skip**。示例：
+  ```python
+  def setUp(self):
+      super().setUp()
+      device_name = torch._C._get_privateuse1_backend_name()
+      self.assertEqual(device_name, 'npu', f"Expected device 'npu', got '{device_name}'")
+  ```
+- 多卡用例：对 **≥2 块 NPU** 的测试方法使用 **`@skipIfUnsupportMultiNPU(n)`**（`from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU`），与 ascend 一致。**`torch.distributed` 下 API** 须先按 [DISTRIBUTED_API_UT.md](DISTRIBUTED_API_UT.md) 判断：除纯 Python 工具类外，**默认使用多卡 HCCL 测试**。
 - 文件末尾：`if __name__ == "__main__": run_tests()`（无 `torch_npu` 时回退 `unittest.main`，与 `gen-distributed-ut` 技能中模式一致）。
 - 断言：`self.assert*` / `self.assertRaises` / `self.assertRaisesRegex`；**禁止**以逐元素浮点对比做**数值精度**验收（见下文「禁止事项」）。
 - **注释语言**：除文件顶部按模板编写的**头部注释**（简体中文 docstring / 覆盖维度表等）外，**代码中**其余注释（行内注释、`#` 说明、测试方法 docstring 若需编写）**统一使用英文**；避免正文代码块中英混用。
@@ -103,6 +110,7 @@ API 签名：{完整签名}
 - **可选参数**：显式传入 vs 省略默认
 - **等价类、边界值**（空 tensor、单元素、典型 shape 等）
 - **正常路径**与**可稳定断言的异常路径**（无稳定异常则于表中注明未覆盖）
+- **混合设备输入场景**：对于涉及多 Tensor 输入的 API，需补充 **NPU/CPU 混合设备输入**场景的测试，验证 API 对异构设备输入的处理行为（如是否抛出异常、是否正确处理等）
 
 **禁止**只写一条 happy path。
 
@@ -124,10 +132,36 @@ API 签名：{完整签名}
 | 仅本次单个 API 的 UT | `test/{api_full_name_underscored}/UT_REPORT.md` |
 | 本次跑完整个 `test/` 或需总表 | `test/UT_EXECUTION_REPORT.md`（可覆盖为最近一次全量结果） |
 
-报告建议含：执行命令、环境摘要（含 CANN/torch_npu 若可知）、通过/跳过/失败列表、失败栈摘要、与本次改动文件列表。
+报告必须包含以下内容：
+- **执行命令**：完整的测试执行命令
+- **环境摘要**：Python 版本、PyTorch 版本、torch_npu 版本、NPU 设备信息、CANN 版本
+- **测试结果表**：列出所有测试方法及其结果（PASS/FAIL/SKIP）
+- **统计信息**：通过数、跳过数、失败数
+- **跳过用例分析表**：列出所有被跳过的用例，包含跳过条件、跳过原因、合理性评估
+- **失败栈摘要**：如有失败用例，提供关键错误信息
+- **本次改动文件列表**
+
+**报告格式示例**：
+```markdown
+## 测试结果
+| 测试方法 | 结果 | 说明 |
+|----------|------|------|
+| test_xxx | PASS | 测试说明 |
+| test_yyy | SKIP | 跳过原因说明 |
+
+## 统计
+- 通过: X
+- 跳过: Y
+- 失败: Z
+
+## 跳过用例分析
+| 测试方法 | 跳过条件 | 跳过原因 | 合理性评估 |
+|----------|----------|----------|------------|
+| test_xxx | device_count < 2 | 需要多卡环境 | 合理，使用 @skipIfUnsupportMultiNPU(2) |
+```
 
 ## 延伸阅读（渐进式披露）
 
 上述条款为公共基线。
 
-- **若目标 API 属于 `torch.distributed` 命名空间**（集合通信、进程组、分布式工具函数等）：生成 UT 时需额外阅读本目录下的 [**DISTRIBUTED_API_UT.md**](DISTRIBUTED_API_UT.md)。其中要求：**先判断该 API 是否必须多卡（多进程 / `world_size≥2` / 多 NPU）才能覆盖语义**；仅在有必要时编写多卡用例并配合 `@skipIfUnsupportMultiNPU`，避免无差别堆多卡用例。
+- **若目标 API 属于 `torch.distributed` 命名空间**（集合通信、进程组、分布式工具函数等）：生成 UT 时需额外阅读本目录下的 [**DISTRIBUTED_API_UT.md**](DISTRIBUTED_API_UT.md)。其中要求：**除纯 Python 工具类外，所有分布式 API 默认使用多卡 HCCL 测试**；配合 `@skipIfUnsupportMultiNPU` 装饰器。
