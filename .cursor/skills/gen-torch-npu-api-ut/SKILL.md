@@ -23,12 +23,12 @@ description: >-
 - 使用 **`unittest`**：**禁止** `pytest` 全系 API（含 `pytest.mark`、`pytest.raises`、`pytest.skip`、`pytest.fixture`、`pytest.parametrize` 等）。
 - 测试类**继承 `TestCase`**；测试方法名为 `test_*`。
 - 优先使用 `from torch_npu.testing.testcase import TestCase, run_tests`；若需与 ascend 部分文件一致，可对照同目录是否使用 `torch.testing._internal.common_utils.TestCase`（以**目标目录最近邻**用例为准）。
-- **设备检查统一放在 `setUp` 中**：使用 `torch._C._get_privateuse1_backend_name()` 检查设备类型，如果不是 `'npu'` 直接报错（`self.assertEqual` 或 `raise AssertionError`），**不要 skip**。示例：
+- **设备检查统一放在 `setUp` 中**：使用 `torch._C._get_privateuse1_backend_name()` 检查设备类型，如果不是 `'npu'` 直接报错（`self.assertEqual` 或 `raise AssertionError`），**不要 skip**。将 device_name 保存为实例属性供测试方法使用，**禁止**在测试方法中硬编码 `'npu'`。示例：
   ```python
   def setUp(self):
       super().setUp()
-      device_name = torch._C._get_privateuse1_backend_name()
-      self.assertEqual(device_name, 'npu', f"Expected device 'npu', got '{device_name}'")
+      self.device_name = torch._C._get_privateuse1_backend_name()
+      self.assertEqual(self.device_name, 'npu', f"Expected device 'npu', got '{self.device_name}'")
   ```
 - 多卡用例：对 **≥2 块 NPU** 的测试方法使用 **`@skipIfUnsupportMultiNPU(n)`**（`from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU`），与 ascend 一致。**`torch.distributed` 下 API** 须先按 `references/DISTRIBUTED_API_UT.md` 判断：除纯 Python 工具类外，**默认使用多卡 HCCL 测试**。
 - 文件末尾：`if __name__ == "__main__": run_tests()`（无 `torch_npu` 时回退 `unittest.main`，与 `gen-distributed-ut` 技能中模式一致）。
@@ -98,6 +98,12 @@ API 签名：{完整签名}
 ## 设备与 NPU/CPU 占比
 
 - **设备类型字符串**：使用 `torch._C._get_privateuse1_backend_name()` 获取（加载 `torch_npu` 并完成注册后通常为 `"npu"`）。构造 `torch.device` 时与该字符串一致，避免写死 `"cuda"`（除非对照 ascend 中明确需要双端分支的范式）。
+- **device_name 使用规范**：
+  - 在 `setUp` 中将 `device_name` 保存为实例属性：`self.device_name = torch._C._get_privateuse1_backend_name()`
+  - 在测试方法中使用 `self.device_name` 而非硬编码 `'npu'`
+  - 示例：`x = torch.randn(10, device=self.device_name)` 而非 `x = torch.randn(10, device='npu')`
+  - **多进程测试**：将 `device_name` 作为参数传递给子进程函数，在子进程中使用传递的 `device_name` 参数
+  - 多卡测试中的 `f'npu:{rank}'` 形式是允许的，用于指定特定 rank 的设备
 - **默认假设 NPU 可用**；用例主体在 NPU 上执行。
 - 若 API **同时支持 CPU**：在**整套测试方法**中，**NPU 上执行的用例数量应 >80%**，**CPU 用例 ≤20%**（仅保留必要基线，如 dtype/shape 或文档声明的 CPU 路径）。
 
