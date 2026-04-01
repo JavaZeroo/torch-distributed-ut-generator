@@ -18,19 +18,21 @@ description: >-
 
 ## 风格约定（与 ascend_pytorch/test 对齐）
 
-**必须**以 `ascend_pytorch/test/` 下用例为范本（如 `test/npu/test_torch_npu.py`、`test/optim/test_optim.py`），保持统一：
-
-- 使用 **`unittest`**：**禁止** `pytest` 全系 API（含 `pytest.mark`、`pytest.raises`、`pytest.skip`、`pytest.fixture`、`pytest.parametrize` 等）。
-- 测试类**继承 `TestCase`**；测试方法名为 `test_*`。
-- 优先使用 `from torch_npu.testing.testcase import TestCase, run_tests`；若需与 ascend 部分文件一致，可对照同目录是否使用 `torch.testing._internal.common_utils.TestCase`（以**目标目录最近邻**用例为准）。
-- **设备检查统一放在 `setUp` 中**：使用 `torch._C._get_privateuse1_backend_name()` 检查设备类型，如果不是 `'npu'` 直接报错（`self.assertEqual` 或 `raise AssertionError`），**不要 skip**。示例：
+- **必须**以 `ascend_pytorch/test/` 下用例为范本（如 `test/npu/test_torch_npu.py`、`test/optim/test_optim.py`），保持统一：
+  - 使用 **`unittest`**：**禁止** `pytest` 全系 API（含 `pytest.mark`、`pytest.raises`、`pytest.skip`、`pytest.fixture`、`pytest.parametrize` 等）。
+  - 测试类**继承 `TestCase`**；测试方法名为 `test_*`。
+  - 优先使用 `from torch_npu.testing.testcase import TestCase, run_tests`；若需与 ascend 部分文件一致，可对照同目录是否使用 `torch.testing._internal.common_utils.TestCase`（以**目标目录最近邻**用例为准）。
+  - **设备检查统一放在 `setUp` 中**：使用 `torch._C._get_privateuse1_backend_name()` 检查设备类型，如果不是 `'npu'` 直接报错（`self.assertEqual` 或 `raise AssertionError`），**不要 skip**。将 device_name 保存为实例属性供测试方法使用，**禁止**在测试方法中硬编码 `'npu'`。示例：
+  
   ```python
   def setUp(self):
       super().setUp()
-      device_name = torch._C._get_privateuse1_backend_name()
-      self.assertEqual(device_name, 'npu', f"Expected device 'npu', got '{device_name}'")
+      self.device_name = torch._C._get_privateuse1_backend_name()
+      self.assertEqual(self.device_name, 'npu', f"Expected device 'npu', got '{self.device_name}'")
   ```
-- 多卡用例：对 **≥2 块 NPU** 的测试方法使用 **`@skipIfUnsupportMultiNPU(n)`**（`from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU`），与 ascend 一致。分布式类 API 的多卡策略详见下文「专项文档路由」。
+  
+- 多卡用例：对 **≥2 块 NPU** 的测试方法使用 **`@skipIfUnsupportMultiNPU(n)`**（`from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU`），与 ascend 一致。**`torch.distributed` 下 API** 须先按 `DISTRIBUTED_API_UT.md` 判断：除纯 Python 工具类外，**默认使用多卡 HCCL 测试**。分布式类 API 的多卡策略详见下文「专项文档路由」。
+
 - 文件末尾：`if __name__ == "__main__": run_tests()`（无 `torch_npu` 时回退 `unittest.main`，与 `gen-distributed-ut` 技能中模式一致）。
 - 断言：`self.assert*` / `self.assertRaises` / `self.assertRaisesRegex`；**禁止**以逐元素浮点对比做**数值精度**验收（见下文「禁止事项」）。
 - **注释语言**：除文件顶部按模板编写的**头部注释**（简体中文 docstring / 覆盖维度表等）外，**代码中**其余注释（行内注释、`#` 说明、测试方法 docstring 若需编写）**统一使用英文**；避免正文代码块中英混用。
