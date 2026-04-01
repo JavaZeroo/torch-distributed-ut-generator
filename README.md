@@ -1,191 +1,169 @@
-# torch_npu API UT 生成与执行流程
+# pta-ut-generator（torch_npu / PTA API 功能 UT）
+
+面向 **torch_npu（PTA）** 场景，用 Agent 技能规范生成与 **`ascend_pytorch/test` 风格一致**的 API 功能单元测试（**`unittest` + `TestCase`**）。本仓库以 **Cursor / Claude 技能定义**与 **`test/` 下示例 UT** 为主；可选通过子模块拉取 `pytorch`、`ascend_pytorch` 作签名与适配层对照。
 
 ```mermaid
 flowchart TD
-	A["用户请求生成 torch_npu API UT"] --> B{用户是否指定API类别?}
-	B -- 否 --> B1["主动询问用户API类别, 停止流程等待"]
-	B -- 是 --> C["确认API全名和类别"]
-	C --> D["查阅PyTorch API签名和参数"]
-	D --> E["查阅NPU适配层 transfer_to_npu.py"]
-	E --> F["查阅现有测试(ascend_pytorch/test, pytorch/test)"]
-	F --> G["生成测试文件: test/{api_full_name_underscored}/test_{api_full_name_underscored}.py"]
-	G --> H["补充头部注释(中文模板+覆盖维度表)"]
-	H --> I["实现unittest风格TestCase, setUp检查设备"]
-	I --> J["用例设计: 参数全覆盖, 结构/类型断言, 禁止数值精度断言"]
-	J --> K["多卡用例加@skipIfUnsupportMultiNPU"]
-	K --> L["文件末尾加run_tests()"]
-	L --> M["询问用户是否执行UT"]
-	M -- 否 --> M1["流程结束"]
-	M -- 是 --> N["执行UT"]
-	N --> O{UT是否全部通过?}
-	O -- 否 --> P["仅修改test/下文件, 修复并重试"]
-	P --> N
-	O -- 是 --> Q["生成/更新UT报告(UT_REPORT.md/UT_EXECUTION_REPORT.md)"]
-	Q --> R["流程结束"]
+	A["用户请求生成 torch_npu API UT"] --> B{用户是否指定 API 类别?}
+	B -- 否 --> B1["主动询问类别（计算 / 框架 / 分布式），等待"]
+	B -- 是 --> C["确认 API 全名与类别"]
+	C --> D["查阅 PyTorch 签名与参数"]
+	D --> E["查阅 NPU 适配层 transfer_to_npu.py"]
+	E --> F["查阅现有测试 ascend_pytorch/test、pytorch/test"]
+	F --> G["按类别打开专项文档 COMPUTE / FRAMEWORK / DISTRIBUTED"]
+	G --> H["生成 test/{api_full_name_underscored}/test_*.py"]
+	H --> I["头部中文注释 + 覆盖维度表"]
+	I --> J["unittest、setUp 设备检查、禁止数值精度断言"]
+	J --> K["多卡加 @skipIfUnsupportMultiNPU（分布式类）"]
+	K --> L["末尾 run_tests()"]
+	L --> M["询问是否在本机执行 UT"]
+	M -- 否 --> M1["结束"]
+	M -- 是 --> N["仅改 test/ 修复直至通过"]
+	N --> O["UT_REPORT.md / UT_EXECUTION_REPORT.md"]
 ```
-# torch-distributed-ut-generator
-
-自动化生成 PyTorch 分布式及相关 API 的功能单元测试用例，专为华为昇腾 NPU (`torch_npu`) 环境设计，与 `ascend_pytorch` 测试风格保持一致。
 
 ## 项目概述
 
-本项目是 Cursor Agent 的技能仓库，提供标准化的测试生成规范，用于为 `torch_npu`（PTA）场景生成符合 ascend_pytorch/test 风格的 API 功能 UT。支持单卡和多卡（HCCL）测试场景，确保 PyTorch 分布式 API 在 NPU 环境下的功能正确性。
+- **技能仓库**：在 Cursor（`.cursor/skills/`）与 Claude Code（`.claude/skills/`）中提供同名技能 **`gen-torch-npu-api-ut`**，规则以 Cursor 侧为主副本时，二者内容应对齐。
+- **生成物**：仅允许新增或修改仓库根目录下 **`test/`** 内的 Python 与报告 Markdown；**不得**修改子模块内上游源码。
+- **API 类别**（生成前必须由用户明确）：**计算类**、**框架类**、**分布式类**；对应专项说明见下表。
 
-## 项目结构
+## 目录结构（与当前仓库一致）
 
 ```
 .
-├── .cursor/skills/gen-torch-npu-api-ut/    # Cursor Agent 技能定义
-│   ├── SKILL.md                           # 主要技能文档：UT 生成规范
+├── .cursor/skills/gen-torch-npu-api-ut/
+│   ├── SKILL.md                          # 主技能：流程、命名、禁忌、报告
 │   └── references/
-│       └── DISTRIBUTED_API_UT.md          # 分布式 API 测试补充规范
-├── test/                                  # 生成的测试用例
-│   ├── UT_EXECUTION_REPORT.md             # 测试执行报告
-│   ├── _Work/                             # torch.distributed.Work 测试
-│   ├── _Work_wait/                        # torch.distributed.Work.wait 测试
-│   ├── tensor_DTensor_local_tensor/       # DTensor._local_tensor 测试
-│   ├── tensor_dtensor_spec_TensorMeta/    # TensorMeta 测试
-│   ├── _composable_contract/              # 分布式可组合合约测试
-│   ├── _composable_contract_get_registry/ # 合约注册表测试
-│   ├── _composable_state_insert_module_state/  # 模块状态测试
-│   ├── utils_get_root_modules/             # 工具函数测试
-│   ├── device_mesh_get_device_handle/      # 设备网格测试
-│   ├── fsdp_common_utils_named_parameters_with_duplicates/  # FSDP 测试
-│   ├── cuda_Stream_wait_stream/           # CUDA Stream 适配测试
-│   ├── split_with_sizes_copy/             # Tensor 操作测试
-│   └── tensor_copy_/                      # Tensor copy_ 测试
-├── ascend_pytorch/                        # 子模块：昇腾 PyTorch 适配
-└── pytorch/                               # 子模块：原生 PyTorch
+│       ├── COMPUTE_API_UT.md             # 计算类 API
+│       ├── FRAMEWORK_API_UT.md           # 框架类 API
+│       └── DISTRIBUTED_API_UT.md         # 分布式类 API
+├── .claude/skills/gen-torch-npu-api-ut/  # Claude 侧同名技能（含上述专项 md 副本）
+├── test/                                 # 示例与产出 UT（按 API 分子目录）
+│   ├── UT_EXECUTION_REPORT.md            # 最近一次全量执行摘要（若有）
+│   └── {api_full_name_underscored}/      # 各 API 独立目录
+│       ├── test_*.py
+│       └── UT_REPORT.md                  # 单 API 执行报告（可选）
+├── ascend_pytorch/                       # git submodule（可选）
+├── pytorch/                              # git submodule（可选）
+└── README.md
 ```
 
-## 子模块依赖
+## 子模块（参考源码）
 
-本项目依赖以下子模块作为参考和测试目标：
-
-| 子模块 | 仓库 | 用途 |
-|--------|------|------|
-| `ascend_pytorch` | https://gitcode.com/Ascend/pytorch.git | NPU 适配层参考、测试风格范本 |
-| `pytorch` | https://github.com/pytorch/pytorch.git | 原生 PyTorch API 定义和测试参考 |
-
-## 初始化
+| 路径 | 远程 | 用途 |
+|------|------|------|
+| `ascend_pytorch` | https://gitcode.com/Ascend/pytorch.git | NPU 适配、`transfer_to_npu`、测试风格范本 |
+| `pytorch` | https://github.com/pytorch/pytorch.git | 官方 API 签名与测试参考 |
 
 ```bash
-# 克隆并初始化子模块
 git submodule update --init --recursive
 ```
 
-## 核心特性
+仅浏览 **`pytorch/torch`** 与 **`ascend_pytorch`** 主树（不编 ascend 全量）时，可只用非递归以节省时间：
 
-### 测试框架规范
-- **测试框架**：使用 `unittest` + `TestCase`，**禁止** `pytest` 全系 API
-- **NPU 优先**：>80% 用例在 NPU 执行，设备名通过 `torch._C._get_privateuse1_backend_name()` 动态获取
-- **设备检查**：统一放在 `setUp()` 中，使用 `self.assertEqual` 断言设备类型为 `'npu'`
+```bash
+git submodule update --init
+```
 
-### 分布式测试策略
-- **纯 Python 工具类**（如 `_get_root_modules`, `TensorMeta`）：单进程测试
-- **集合通信/P2P/进程组/异步工作对象**：**默认使用多卡 HCCL 测试**
-- **多卡测试**：使用 `mp.spawn` 或 `Process`，配合 `@skipIfUnsupportMultiNPU(n)` 装饰器
+### 子模块拉不下来时的常见原因
 
-### 已覆盖 API（13 个，75 个测试用例全部通过）
+1. **父仓库从未登记子模块**：若历史提交里只有 `.gitmodules`，但 **没有** 把 `pytorch`、`ascend_pytorch` 以子模块记录（索引里应是 **模式 `160000` 的 gitlink**），则 `git submodule update --init` 不会克隆任何东西。需要在父仓库中执行 `git submodule add <url> <path>` 并提交、推送后再克隆。
+2. **`.gitignore` 忽略了子模块路径**：例如存在 `pytorch/` 规则时，`git submodule add` 会失败（提示 *ignored by .gitignore*）。子模块目录**不应**被忽略。
+3. **`--recursive` 很慢或部分第三方失败**：`ascend_pytorch` 内含多层 `third_party`，递归拉取体积大且依赖 gitcode/gitee 等网络。可改用上面的非递归 `update --init`；若仅需读 `transfer_to_npu` 与 PyTorch 签名，一般足够。
 
-| API 名称 | 测试文件 | 测试数 | 测试类型 |
-|----------|----------|--------|----------|
-| `torch.distributed.Work` | `_Work/` | 2 | 多卡 HCCL |
-| `torch.distributed.Work.wait` | `_Work_wait/` | 3 | 多卡 HCCL |
-| `torch.distributed.tensor.DTensor._local_tensor` | `tensor_DTensor_local_tensor/` | 2 | 多卡 HCCL |
-| `torch.distributed.tensor._dtensor_spec.TensorMeta` | `tensor_dtensor_spec_TensorMeta/` | 7 | 单进程 |
-| `torch.distributed._composable.contract` | `_composable_contract/` | 5 | 单进程 |
-| `torch.distributed._composable.contract._get_registry` | `_composable_contract_get_registry/` | 5 | 单进程 |
-| `torch.distributed._composable_state._insert_module_state` | `_composable_state_insert_module_state/` | 5 | 单进程 |
-| `torch.distributed.utils._get_root_modules` | `utils_get_root_modules/` | 7 | 单进程 |
-| `torch.distributed.device_mesh._get_device_handle` | `device_mesh_get_device_handle/` | 6 | 单进程 |
-| `torch.distributed.fsdp._common_utils._named_parameters_with_duplicates` | `fsdp_common_utils_named_parameters_with_duplicates/` | 7 | 单进程 |
-| `torch.cuda.Stream.wait_stream` | `cuda_Stream_wait_stream/` | 6 | 单进程 |
-| `torch.split_with_sizes_copy` | `split_with_sizes_copy/` | 10 | 单进程 |
-| `tensor.copy_` | `tensor_copy_/` | 10 | 单进程 |
+未初始化子模块时，仍可阅读本仓库 **`SKILL.md`** 与 **`test/`** 示例；生成前若需查签名，需在本地配置好对应源码路径或拉取子模块。
 
-## 使用技能生成测试
+## 技能与参考文档
 
-### 触发技能
-在 Cursor 中，当需要生成 torch_npu API 功能用例时，Agent 会自动激活 `gen-torch-npu-api-ut` 技能。
+| 文档 | 说明 |
+|------|------|
+| [.cursor/skills/gen-torch-npu-api-ut/SKILL.md](.cursor/skills/gen-torch-npu-api-ut/SKILL.md) | 触发条件、命名规则、`setUp` 设备检查、禁止 pytest、报告要求、类别路由 |
+| [references/COMPUTE_API_UT.md](.cursor/skills/gen-torch-npu-api-ut/references/COMPUTE_API_UT.md) | 计算类：shape/dtype/device、混合设备等 |
+| [references/FRAMEWORK_API_UT.md](.cursor/skills/gen-torch-npu-api-ut/references/FRAMEWORK_API_UT.md) | 框架类：工具与硬件感知分支、日志等约束 |
+| [references/DISTRIBUTED_API_UT.md](.cursor/skills/gen-torch-npu-api-ut/references/DISTRIBUTED_API_UT.md) | 分布式类：默认多卡 HCCL、`skipIfUnsupportMultiNPU` 等 |
 
-### 生成流程
-1. **确认目标 API**：明确要测试的 torch API 全名（如 `torch.distributed.Work`）
-2. **查阅 API 签名**：在 `pytorch/torch/` 下定位实现，读取完整函数/方法签名
-3. **查阅 NPU 适配层**：检查 `ascend_pytorch/torch_npu/contrib/transfer_to_npu.py` 的 patch 映射
-4. **查阅分布式规范**（如适用）：分布式 API 需阅读 `DISTRIBUTED_API_UT.md`
-5. **生成 UT**：按规范生成测试文件到 `test/{api_full_name_underscored}/`
+## `test/` 中现有示例 UT（按目录）
 
-### 文件命名规范
+以下为当前仓库内已存在的 UT 目录及 **`test_*` 方法数量**（与源码统计一致，便于对照 SKILL 中的命名规则）。
+
+| 目录名 | 测试方法数 | 对应 API（逻辑名，示例） |
+|--------|------------|-------------------------|
+| `Work` | 2 | `torch.distributed.Work` |
+| `Work_wait` | 3 | `torch.distributed.Work.wait` |
+| `tensor_DTensor_local_tensor` | 2 | `torch.distributed.tensor.DTensor._local_tensor` |
+| `tensor_dtensor_spec_TensorMeta` | 7 | `torch.distributed.tensor._dtensor_spec.TensorMeta` |
+| `_composable_contract` | 5 | `torch.distributed._composable.contract` |
+| `_composable_contract_get_registry` | 5 | `torch.distributed._composable.contract._get_registry` |
+| `_composable_state_insert_module_state` | 5 | `torch.distributed._composable_state._insert_module_state` |
+| `utils_get_root_modules` | 7 | `torch.distributed.utils._get_root_modules` |
+| `device_mesh_get_device_handle` | 6 | `torch.distributed.device_mesh._get_device_handle` |
+| `fsdp_common_utils_named_parameters_with_duplicates` | 7 | `torch.distributed.fsdp._common_utils._named_parameters_with_duplicates` |
+| `cuda_Stream_wait_stream` | 6 | `torch.cuda.Stream.wait_stream` |
+| `split_with_sizes_copy` | 18 | `torch.split_with_sizes_copy` |
+| `tensor_copy_` | 18 | `torch.Tensor.copy_` |
+| `_logging_warning_once` | 12 | `torch._logging.warning_once` |
+| `_foreach_copy_` | 16 | `torch._foreach_copy_` |
+| `autograd_graph__MultiHandle` | 23 | `torch.autograd.graph._MultiHandle` |
+
+**合计**：16 组目录，**142** 个 `test_*` 方法。全量通过与否以你在 NPU 环境中的实际执行为准；历史一次全量摘要见 [test/UT_EXECUTION_REPORT.md](test/UT_EXECUTION_REPORT.md)（其中统计口径可能与当前代码行数不一致时，以本表与源码为准）。
+
+## 命名与输出路径（摘要）
+
 ```
 test/{api_full_name_underscored}/test_{api_full_name_underscored}.py
 ```
 
-- 去掉 `torch.` 前缀，剩余段中的 `.` 替换为 `_`
-- 例：`torch.distributed.Work` → `Work`
-- 例：`torch.distributed.tensor.DTensor._local_tensor` → `tensor_DTensor_local_tensor`
-- **禁止**在文件名中使用 `.`
+- 去掉 `torch.` 后，将剩余路径中的 `.` 换成 `_`，目录与文件名**不含点号**。
+- 示例：`torch.distributed.Work` → 目录 `Work`；`torch.nn.functional.relu` → `nn_functional_relu`。
 
 ## 执行测试
 
-### 单个 API 测试
+技能要求使用 **`unittest`**，**禁止**在 UT 源码中使用 pytest API。运行方式示例：
+
+**单个目录（示例：`Work`）**
+
 ```bash
 cd test/Work
-python -m unittest test_distributed_Work -v
-```
-
-### 全部测试
-```bash
-cd test
-python -m pytest . -v
+python test_distributed_Work.py
 # 或
-python -m unittest discover -v
+python -m unittest test_distributed_Work.TestDistributedWork -v
 ```
 
-### NPU 环境要求
-- `torch_npu` 已安装并可用
-- 至少 1 块 NPU（多卡测试需要 ≥2 块）
-- CANN 环境配置正确
+**全量执行**：各 API 在独立子目录中，且子目录下通常**无** `__init__.py`，`unittest discover` 不会从 `test/` 根目录一次性递归到所有子文件夹。可在仓库根目录对**每个子目录**分别发现，例如：
+
+```bash
+# 示例：只跑 Work 目录
+python -m unittest discover -s test/Work -p "test_*.py" -v
+```
+
+在 **PowerShell** 中遍历所有子目录（每个目录一个 `test_*.py`）：
+
+```powershell
+Set-Location <仓库根目录>
+Get-ChildItem -Path test -Directory | ForEach-Object {
+  python -m unittest discover -s $_.FullName -p "test_*.py" -v
+}
+```
+
+或直接逐个执行各目录下的 `python test_xxx.py`（文件末尾一般为 `run_tests()`）。
+
+**环境**：需已安装并可使用 **`torch_npu`**；多卡用例需满足对应用例中 `@skipIfUnsupportMultiNPU(n)` 的 NPU 数量。
 
 ## 测试报告
 
-每次执行测试后需生成 Markdown 报告：
+执行完成后，按 SKILL 要求在 Markdown 中记录命令、环境、PASS/FAIL/SKIP、跳过原因等：
 
-| 场景 | 报告路径 |
-|------|----------|
-| 单个 API | `test/{api_name}/UT_REPORT.md` |
-| 全部测试 | `test/UT_EXECUTION_REPORT.md` |
-
-报告内容要求：
-- 执行命令和环境摘要（Python/PyTorch/torch_npu/CANN 版本）
-- 测试结果表（PASS/FAIL/SKIP）
-- 统计信息（通过/跳过/失败数）
-- 跳过用例分析表（条件、原因、合理性）
-- 失败栈摘要（如有）
-
-最新报告：[test/UT_EXECUTION_REPORT.md](test/UT_EXECUTION_REPORT.md)
-
-## 技能文档
-
-| 文档 | 说明 |
+| 场景 | 路径 |
 |------|------|
-| [SKILL.md](.cursor/skills/gen-torch-npu-api-ut/SKILL.md) | 主要技能文档：UT 生成规范、文件格式、用例设计原则 |
-| [DISTRIBUTED_API_UT.md](.cursor/skills/gen-torch-npu-api-ut/references/DISTRIBUTED_API_UT.md) | 分布式 API 测试补充规范：多卡测试策略、HCCL 模板、自检清单 |
+| 单个 API | `test/{api_full_name_underscored}/UT_REPORT.md` |
+| 全量或总表 | `test/UT_EXECUTION_REPORT.md` |
 
-## 运行截图
-![UT Execution Screenshot](imgs/image.png)
+## 贡献约定
 
-## 贡献与开发
-
-### 禁止修改范围
-**仅允许**创建或修改 `test/` 目录下文件；**不得**改动 `pytorch/`、`ascend_pytorch/` 内任何源码。
-
-### 用例设计原则
-- **参数全覆盖**：空/非空、枚举选项、参数类型、传参与不传参、等价类/边界值
-- **混合设备输入**：验证 NPU/CPU 异构设备输入的处理行为
-- **异常路径**：验证可稳定断言的异常场景
-- **禁止**只写一条 happy path
+- **仅修改 `test/`**（及本仓库说明类文档如 README）；子模块 **`pytorch/`、`ascend_pytorch/`** 保持上游内容，不在本仓库直接改上游实现。
+- 用例设计：参数与类型覆盖、混合设备、可稳定断言的异常路径；**不做**逐元素浮点精度验收。
 
 ## License
 
-本项目遵循上游 PyTorch 项目的许可证。
+与上游 PyTorch / 昇腾适配栈的许可保持一致；以各子模块及依赖包声明为准。

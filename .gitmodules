@@ -4,3 +4,5 @@
 [submodule "pytorch"]
 	path = pytorch
 	url = https://github.com/pytorch/pytorch.git
+	# 官方仓库嵌套子模块多，浅克隆或未完整 recursive 时常为 -dirty；本仓仅作 API 参考时可忽略
+	ignore = dirty
