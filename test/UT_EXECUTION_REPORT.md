@@ -6,9 +6,9 @@
 
 ## 测试 API 列表
 
-本次共为 **18个分布式类 API** 生成功能测试用例：
+本次共为 **27个分布式类 API** 生成功能测试用例（含本批次新增 9 个）：
 
-### FSDPModule 方法（7个）
+### FSDPModule 方法（12个）
 | API 名称 | 路径 | 测试方法数 |
 |---------|------|-----------|
 | torch.distributed.fsdp.FSDPModule.set_all_reduce_hook | test/fsdp_FSDPModule_methods/ | 1 |
@@ -33,13 +33,18 @@
 | torch.distributed.fsdp.FullyShardedDataParallel.register_comm_hook | test/fsdp_FullyShardedDataParallel_methods/ | 1 |
 | torch.distributed.fsdp.FullyShardedDataParallel.sharded_optim_state_dict | test/fsdp_FullyShardedDataParallel_methods/ | 1 |
 
-### 其他分布式类 API（4个）
+### 其他分布式类 API（9个）
 | API 名称 | 路径 | 测试方法数 |
 |---------|------|-----------|
 | torch.distributed.tensor.parallel.PrepareModuleOutput | test/tensor_parallel_PrepareModuleOutput/ | 4 |
 | torch.distributed.tensor.placement_types.Partial | test/tensor_placement_types_Partial/ | 8 |
 | torch.distributed.distributed_c10d.split_group | test/distributed_c10d_split_group/ | 6 |
 | torch.distributed.distributed_c10d.new_subgroups | test/distributed_c10d_new_subgroups/ | 8 |
+| torch.distributed.fsdp.FSDPModule（含 reshard/prefetch/gradient_sync）| test/_fsdp_FSDPModule/ | 9 |
+| torch.distributed.tensor.DTensor.to_local | test/_tensor_DTensor_to_local/ | 9 |
+| torch.distributed.destroy_process_group | test/distributed_c10d_destroy_process_group/ | 4 |
+| torch.distributed.distributed_c10d.ProcessGroupXCCL | test/distributed_c10d_ProcessGroupXCCL/ | 5 |
+| torch.distributed.reinit_process_group | test/distributed_c10d_reinit_process_group/ | 4 |
 
 ## 测试文件详情
 
@@ -194,15 +199,26 @@ python test/distributed_c10d_new_subgroups/test_distributed_c10d_new_subgroups.p
 | PrepareModuleOutput | 非法 reduce_op 值 | Partial 对非法 reduce_op 的处理行为未明确文档化 |
 | split_group/new_subgroups | 非法参数组合 | 异常处理依赖底层 NCCL/HCCL 实现，无稳定 Python 层异常路径 |
 
-## 测试统计
+## 本批次执行结果（2026-04-08）
+
+| 测试文件 | 测试数 | PASS | SKIP | FAIL | 耗时 |
+|----------|--------|------|------|------|------|
+| test/_fsdp_FSDPModule/ | 9 | 9 | 0 | 0 | 154.8s |
+| test/_tensor_DTensor_to_local/ | 9 | 9 | 0 | 0 | 153.4s |
+| test/distributed_c10d_ProcessGroupXCCL/ | 5 | 5 | 0 | 0 | 17.9s（含1次修复）|
+| test/distributed_c10d_reinit_process_group/ | 4 | 4 | 0 | 0 | 213.5s |
+| **合计** | **27** | **27** | **0** | **0** | — |
+
+## 累计测试统计
 
 | 类别 | 数量 |
 |-----|------|
-| 测试 API 总数 | 18 |
-| 测试文件数 | 6 |
-| 测试方法总数 | 44 |
-| 需 2 卡测试方法 | 34 |
+| 测试 API 总数 | 27 |
+| 测试文件数 | 10 |
+| 测试方法总数 | 71 |
+| 需 2 卡测试方法 | 58 |
 | 需 4 卡测试方法 | 10 |
+| 单进程测试方法 | 3 |
 
 ## 文件列表
 
@@ -215,6 +231,15 @@ test/tensor_parallel_PrepareModuleOutput/test_tensor_parallel_PrepareModuleOutpu
 test/tensor_placement_types_Partial/test_tensor_placement_types_Partial.py
 test/distributed_c10d_split_group/test_distributed_c10d_split_group.py
 test/distributed_c10d_new_subgroups/test_distributed_c10d_new_subgroups.py
+# 本批次新增
+test/_fsdp_FSDPModule/test__fsdp_FSDPModule.py
+test/_fsdp_FSDPModule/UT_REPORT.md
+test/_tensor_DTensor_to_local/test__tensor_DTensor_to_local.py
+test/_tensor_DTensor_to_local/UT_REPORT.md
+test/distributed_c10d_ProcessGroupXCCL/test_distributed_c10d_ProcessGroupXCCL.py
+test/distributed_c10d_ProcessGroupXCCL/UT_REPORT.md
+test/distributed_c10d_reinit_process_group/test_distributed_c10d_reinit_process_group.py
+test/distributed_c10d_reinit_process_group/UT_REPORT.md
 test/UT_EXECUTION_REPORT.md
 ```
 
