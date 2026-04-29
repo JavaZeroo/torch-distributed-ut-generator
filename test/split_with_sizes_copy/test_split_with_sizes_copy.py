@@ -30,7 +30,6 @@ import torch
 
 try:
     import torch_npu  # noqa: F401
-    from torch_npu.contrib import transfer_to_npu  # noqa: F401
 except ImportError:
     pass
 

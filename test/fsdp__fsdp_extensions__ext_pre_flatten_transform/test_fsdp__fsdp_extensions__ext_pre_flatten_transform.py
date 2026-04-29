@@ -2,15 +2,18 @@
 """
 测试目的：验证 torch.distributed.fsdp._fsdp_extensions._ext_pre_flatten_transform 接口功能正确性
 API 名称：torch.distributed.fsdp._fsdp_extensions._ext_pre_flatten_transform
-API 签名：_ext_pre_flatten_transform(module, fsdp_state, config)
+API 签名：_ext_pre_flatten_transform(tensor: Tensor,
+                                  fsdp_extension: Optional[FSDPExtensions] = None)
+                                  -> tuple[Tensor, Optional[Any]]
 
 覆盖维度表：
 | 覆盖维度         | 说明                                                         | 覆盖情况                                       |
 |------------------|--------------------------------------------------------------|------------------------------------------------|
-| 转换执行         | 验证预展平转换能正确执行                                     | 已覆盖：test_transform_execution                |
-| 参数类型         | 验证参数类型正确性                                           | 已覆盖：test_parameter_types                   |
+| 转换执行         | 验证传入 tensor 能正确返回 (Tensor, extension) 元组          | 已覆盖：test_transform_execution                |
+| 函数签名         | 验证参数及个数                                               | 已覆盖：test_parameter_types                   |
 | 多卡场景         | 在多 NPU 上验证转换一致性                                    | 已覆盖：test_multiprocess_transform            |
-| 返回值验证       | 验证返回值类型和结构                                         | 已覆盖：test_return_type                       |
+| 返回值验证       | 验证返回值是元组且第一项是 Tensor                            | 已覆盖：test_return_type                       |
+| fsdp_extension 缺省 | 不传 fsdp_extension 时也能调用                            | 已覆盖：test_transform_execution                |
 
 未覆盖项及原因：
 - 无
@@ -19,7 +22,9 @@ API 签名：_ext_pre_flatten_transform(module, fsdp_state, config)
      不做精度和数值正确性校验。
 """
 
+import inspect
 import os
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -45,16 +50,12 @@ def _test_ext_pre_flatten_transform(rank, world_size, c2p):
     try:
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_flatten_transform
 
-        # Create a dummy module
-        module = torch.nn.Linear(10, 10)
-        fsdp_state = None
-        config = None
-
-        # Call transform
-        result = _ext_pre_flatten_transform(module, fsdp_state, config)
+        tensor = torch.randn(4, 4)
+        result = _ext_pre_flatten_transform(tensor)
 
         c2p.put((rank, 'transformed', True))
-        c2p.put((rank, 'result_is_none', result is None))
+        c2p.put((rank, 'is_tuple', isinstance(result, tuple)))
+        c2p.put((rank, 'tuple_len', len(result) if isinstance(result, tuple) else -1))
 
     except Exception as e:
         c2p.put((rank, 'error', str(e)))
@@ -70,43 +71,36 @@ class TestExtPreFlattenTransform(TestCase):
         device_name = torch._C._get_privateuse1_backend_name()
         self.assertEqual(device_name, 'npu', f"Expected device 'npu', got '{device_name}'")
 
-    @skipIfUnsupportMultiNPU(2)
     def test_transform_execution(self):
-        """Test _ext_pre_flatten_transform execution."""
+        """Test _ext_pre_flatten_transform execution with a plain tensor."""
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_flatten_transform
 
-        module = torch.nn.Linear(5, 5)
-        fsdp_state = None
-        config = None
+        tensor = torch.randn(5, 5)
+        result = _ext_pre_flatten_transform(tensor)
 
-        # Should not raise
-        result = _ext_pre_flatten_transform(module, fsdp_state, config)
-        # Result can be None or various types
-        self.assertTrue(True)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result[0], torch.Tensor)
 
-    @skipIfUnsupportMultiNPU(2)
     def test_parameter_types(self):
         """Test parameter types for _ext_pre_flatten_transform."""
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_flatten_transform
 
-        # Verify function accepts expected parameters
-        import inspect
         sig = inspect.signature(_ext_pre_flatten_transform)
         params = set(sig.parameters.keys())
 
-        # Should have module parameter
-        self.assertGreater(len(params), 0)
+        self.assertIn('tensor', params)
+        self.assertIn('fsdp_extension', params)
 
-    @skipIfUnsupportMultiNPU(2)
     def test_return_type(self):
         """Test return type of _ext_pre_flatten_transform."""
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_flatten_transform
 
-        module = torch.nn.Identity()
-        result = _ext_pre_flatten_transform(module, None, None)
+        tensor = torch.zeros(3, 3)
+        result = _ext_pre_flatten_transform(tensor, None)
 
-        # Result can be None or a valid return value
-        self.assertTrue(result is None or result is not None)
+        self.assertIsInstance(result, tuple)
+        self.assertIsInstance(result[0], torch.Tensor)
 
     @skipIfUnsupportMultiNPU(2)
     def test_multiprocess_transform(self):
@@ -124,7 +118,7 @@ class TestExtPreFlattenTransform(TestCase):
             ps.append(p)
 
         results = {}
-        for _ in range(world_size * 2):
+        for _ in range(world_size * 3):
             try:
                 rank, event, value = c2p.get(timeout=30)
                 if rank not in results:
@@ -137,7 +131,6 @@ class TestExtPreFlattenTransform(TestCase):
             p.join(timeout=30)
             self.assertEqual(p.exitcode, 0, "subprocess exit with abnormal code.")
 
-        # Verify transformation succeeded on all ranks
         for rank in range(world_size):
             if rank in results:
                 self.assertTrue(results[rank].get('transformed'))

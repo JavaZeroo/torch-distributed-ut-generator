@@ -2,15 +2,18 @@
 """
 测试目的：验证 torch.distributed.distributed_c10d._new_process_group_helper 接口功能正确性
 API 名称：torch.distributed.distributed_c10d._new_process_group_helper
-API 签名：_new_process_group_helper(world_size, rank, backend_name, store, timeout, pg_name)
+API 签名：_new_process_group_helper(group_size, group_rank, global_ranks_in_group,
+                                  backend, store, group_name,
+                                  backend_options=None, timeout=None,
+                                  pg_tag=None, device_id=None, group_desc=None)
 
 覆盖维度表：
 | 覆盖维度         | 说明                                                         | 覆盖情况                                       |
 |------------------|--------------------------------------------------------------|------------------------------------------------|
-| 进程组创建       | 验证新进程组能正确创建                                       | 已覆盖：test_create_process_group               |
-| 参数有效性       | 验证各参数的有效性                                           | 已覆盖：test_parameter_validity                |
-| 多卡场景         | 在多 NPU 上验证进程组创建和销毁                              | 已覆盖：test_multiprocess_group_creation        |
-| 返回值类型       | 验证返回值类型正确                                           | 已覆盖：test_return_type                       |
+| 函数签名         | 验证函数可调用且必填参数存在                                 | 已覆盖：test_create_process_group              |
+| 参数有效性       | 验证函数可被 inspect 解析                                    | 已覆盖：test_parameter_validity                |
+| 多卡场景         | 在多 NPU 上验证 helper 创建子进程组                          | 已覆盖：test_multiprocess_group_creation        |
+| 返回值类型       | helper 返回非 None                                           | 已覆盖：test_multiprocess_group_creation        |
 
 未覆盖项及原因：
 - 无
@@ -19,7 +22,9 @@ API 签名：_new_process_group_helper(world_size, rank, backend_name, store, ti
      不做精度和数值正确性校验。
 """
 
+import inspect
 import os
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -46,17 +51,17 @@ def _test_new_process_group_helper(rank, world_size, c2p):
         from torch.distributed.distributed_c10d import _new_process_group_helper
         from datetime import timedelta
 
-        # Get the default store from the default process group
-        store = dist.GroupMember.WORLD._get_backend_store()
+        default_pg = dist.distributed_c10d._get_default_group()
+        store = dist.distributed_c10d._get_process_group_store(default_pg)
 
-        # Create a new process group using helper
         new_pg = _new_process_group_helper(
-            world_size=world_size,
-            rank=rank,
-            backend_name='hccl',
+            group_size=world_size,
+            group_rank=rank,
+            global_ranks_in_group=list(range(world_size)),
+            backend='hccl',
             store=store,
+            group_name='test_subgroup',
             timeout=timedelta(minutes=30),
-            pg_name='test_group'
         )
 
         c2p.put((rank, 'created', type(new_pg).__name__))
@@ -75,34 +80,26 @@ class TestNewProcessGroupHelper(TestCase):
         device_name = torch._C._get_privateuse1_backend_name()
         self.assertEqual(device_name, 'npu', f"Expected device 'npu', got '{device_name}'")
 
-    @skipIfUnsupportMultiNPU(2)
     def test_create_process_group(self):
-        """Test creating a process group with _new_process_group_helper."""
-        # This API is internal and typically used within HCCL context
+        """Test _new_process_group_helper signature."""
         from torch.distributed.distributed_c10d import _new_process_group_helper
-        from datetime import timedelta
 
-        # Verify function signature accepts expected parameters
-        import inspect
         sig = inspect.signature(_new_process_group_helper)
         params = set(sig.parameters.keys())
 
-        # Should have world_size, rank, backend_name, store parameters
-        expected = {'world_size', 'rank', 'backend_name', 'store'}
-        self.assertTrue(expected.issubset(params))
+        expected = {'group_size', 'group_rank', 'global_ranks_in_group',
+                    'backend', 'store', 'group_name'}
+        self.assertTrue(expected.issubset(params),
+                        f"missing params: {expected - params}")
 
-    @skipIfUnsupportMultiNPU(2)
     def test_parameter_validity(self):
-        """Test parameter types for _new_process_group_helper."""
-        # Verify the function is callable
+        """The function must be callable."""
         from torch.distributed.distributed_c10d import _new_process_group_helper
         self.assertTrue(callable(_new_process_group_helper))
 
-    @skipIfUnsupportMultiNPU(2)
     def test_return_type(self):
-        """Verify _new_process_group_helper returns a ProcessGroup."""
+        """Confirm callable attribute."""
         from torch.distributed.distributed_c10d import _new_process_group_helper
-        # The function should be an internal helper for process group creation
         self.assertTrue(hasattr(_new_process_group_helper, '__call__'))
 
     @skipIfUnsupportMultiNPU(2)
@@ -132,9 +129,6 @@ class TestNewProcessGroupHelper(TestCase):
 
         for p in ps:
             p.join(timeout=30)
-            # Note: some errors may be expected in internal API testing
-            if p.exitcode is not None:
-                pass  # Process group creation may have specific requirements
 
 
 if __name__ == "__main__":

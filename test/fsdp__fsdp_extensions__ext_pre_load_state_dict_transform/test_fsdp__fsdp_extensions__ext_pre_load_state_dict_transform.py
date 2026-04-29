@@ -2,15 +2,17 @@
 """
 测试目的：验证 torch.distributed.fsdp._fsdp_extensions._ext_pre_load_state_dict_transform 接口功能正确性
 API 名称：torch.distributed.fsdp._fsdp_extensions._ext_pre_load_state_dict_transform
-API 签名：_ext_pre_load_state_dict_transform(state_dict, fsdp_state, config)
+API 签名：_ext_pre_load_state_dict_transform(tensor: Tensor,
+                                          fsdp_extension: Optional[FSDPExtensions] = None)
+                                          -> tuple[Tensor, list[Shard]]
 
 覆盖维度表：
 | 覆盖维度         | 说明                                                         | 覆盖情况                                       |
 |------------------|--------------------------------------------------------------|------------------------------------------------|
 | 转换执行         | 验证状态字典预加载转换能正确执行                             | 已覆盖：test_transform_execution                |
-| 参数类型         | 验证参数类型正确性                                           | 已覆盖：test_parameter_types                   |
+| 函数签名         | 验证参数及个数                                               | 已覆盖：test_parameter_types                   |
 | 多卡场景         | 在多 NPU 上验证状态字典转换一致性                            | 已覆盖：test_multiprocess_transform            |
-| 返回值验证       | 验证返回值类型和结构                                         | 已覆盖：test_return_type                       |
+| 返回值验证       | 验证返回值是 (Tensor, list[Shard]) 元组                      | 已覆盖：test_return_type                       |
 
 未覆盖项及原因：
 - 无
@@ -19,7 +21,9 @@ API 签名：_ext_pre_load_state_dict_transform(state_dict, fsdp_state, config)
      不做精度和数值正确性校验。
 """
 
+import inspect
 import os
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -45,16 +49,12 @@ def _test_ext_pre_load_state_dict_transform(rank, world_size, c2p):
     try:
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_load_state_dict_transform
 
-        # Create a dummy state dict
-        state_dict = {'param1': torch.randn(10, 10)}
-        fsdp_state = None
-        config = None
-
-        # Call transform
-        result = _ext_pre_load_state_dict_transform(state_dict, fsdp_state, config)
+        tensor = torch.randn(8)
+        result = _ext_pre_load_state_dict_transform(tensor)
 
         c2p.put((rank, 'transformed', True))
-        c2p.put((rank, 'has_result', result is not None))
+        c2p.put((rank, 'is_tuple', isinstance(result, tuple)))
+        c2p.put((rank, 'tuple_len', len(result) if isinstance(result, tuple) else -1))
 
     except Exception as e:
         c2p.put((rank, 'error', str(e)))
@@ -70,43 +70,38 @@ class TestExtPreLoadStateDictTransform(TestCase):
         device_name = torch._C._get_privateuse1_backend_name()
         self.assertEqual(device_name, 'npu', f"Expected device 'npu', got '{device_name}'")
 
-    @skipIfUnsupportMultiNPU(2)
     def test_transform_execution(self):
         """Test _ext_pre_load_state_dict_transform execution."""
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_load_state_dict_transform
 
-        state_dict = {'key': 'value'}
-        fsdp_state = None
-        config = None
+        tensor = torch.randn(4)
+        result = _ext_pre_load_state_dict_transform(tensor)
 
-        # Should not raise
-        result = _ext_pre_load_state_dict_transform(state_dict, fsdp_state, config)
-        # Result can be various types
-        self.assertTrue(True)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result[0], torch.Tensor)
+        self.assertIsInstance(result[1], list)
 
-    @skipIfUnsupportMultiNPU(2)
     def test_parameter_types(self):
         """Test parameter types for _ext_pre_load_state_dict_transform."""
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_load_state_dict_transform
 
-        # Verify function accepts expected parameters
-        import inspect
         sig = inspect.signature(_ext_pre_load_state_dict_transform)
         params = set(sig.parameters.keys())
 
-        # Should have state_dict parameter
-        self.assertGreater(len(params), 0)
+        self.assertIn('tensor', params)
+        self.assertIn('fsdp_extension', params)
 
-    @skipIfUnsupportMultiNPU(2)
     def test_return_type(self):
         """Test return type of _ext_pre_load_state_dict_transform."""
         from torch.distributed.fsdp._fsdp_extensions import _ext_pre_load_state_dict_transform
 
-        state_dict = {'a': torch.tensor([1.0])}
-        result = _ext_pre_load_state_dict_transform(state_dict, None, None)
+        tensor = torch.tensor([1.0, 2.0, 3.0])
+        result = _ext_pre_load_state_dict_transform(tensor, None)
 
-        # Result should be dict-like or None
-        self.assertTrue(result is None or isinstance(result, dict) or result is not None)
+        self.assertIsInstance(result, tuple)
+        self.assertIsInstance(result[0], torch.Tensor)
+        self.assertIsInstance(result[1], list)
 
     @skipIfUnsupportMultiNPU(2)
     def test_multiprocess_transform(self):
@@ -124,7 +119,7 @@ class TestExtPreLoadStateDictTransform(TestCase):
             ps.append(p)
 
         results = {}
-        for _ in range(world_size * 2):
+        for _ in range(world_size * 3):
             try:
                 rank, event, value = c2p.get(timeout=30)
                 if rank not in results:
@@ -137,7 +132,6 @@ class TestExtPreLoadStateDictTransform(TestCase):
             p.join(timeout=30)
             self.assertEqual(p.exitcode, 0, "subprocess exit with abnormal code.")
 
-        # Verify transformation succeeded on all ranks
         for rank in range(world_size):
             if rank in results:
                 self.assertTrue(results[rank].get('transformed'))
