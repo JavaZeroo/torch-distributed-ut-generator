@@ -1,6 +1,20 @@
-# 框架类 API UT 补充规范
+## 框架类 API UT 补充规范
 
-本文是 [SKILL.md](SKILL.md) 的延伸，适用于**非计算类、非分布式**的框架工具 API。
+本文是 [SKILL.md](../SKILL.md) 的延伸，适用于**非计算类、非分布式**的框架工具 API。
+
+### 适用范围
+
+| 适用（本文生效） | 不适用（回归主技能 SKILL.md） |
+|-----------------|-------------------------------|
+| `torch._logging.warning_once` | `torch.pow`、`torch.add` 等张量运算 |
+| `torch.amp.autocast`（上下文管理器） | `torch.nn.functional.relu` 等神经网络算子 |
+| `torch.autograd.grad`（梯度工具） | `torch.linalg.*`、`torch.fft.*` 等数学运算 |
+| `torch.jit.is_scripting`、`torch.jit.script` | `torch.Tensor.to`、`torch.Tensor.view` 等 Tensor 方法 |
+| `torch.fx.symbolic_trace` | |
+| `torch.profiler.profile` | |
+| `torch._C.*`、`torch.backends.*` 等底层状态/注册 API | |
+
+**判断方法**：API 的主要职责是**处理张量数值**还是**管理框架状态/行为**？前者走主技能，后者走本文。
 
 ---
 

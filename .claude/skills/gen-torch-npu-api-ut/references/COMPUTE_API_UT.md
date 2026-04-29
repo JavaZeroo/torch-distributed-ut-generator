@@ -1,6 +1,21 @@
-# 计算类 API UT 补充规范
+## 计算类 API UT 补充规范
 
-本文是 [SKILL.md](SKILL.md) 的延伸，适用于**以张量数值运算为主体**的计算类 API。
+本文是 [SKILL.md](../SKILL.md) 的延伸，适用于**以张量数值运算为主体**的计算类 API。
+
+### 适用范围
+
+| 适用（本文生效） | 不适用 |
+|-----------------|--------|
+| 逐元素运算：`torch.pow`、`torch.add`、`torch.mul`、`torch.sin` | 框架工具：`torch._logging.*`、`torch.amp.autocast` → [FRAMEWORK_API_UT.md](FRAMEWORK_API_UT.md) |
+| 规约运算：`torch.sum`、`torch.mean`、`torch.max` | 分布式：`torch.distributed.*` → [DISTRIBUTED_API_UT.md](DISTRIBUTED_API_UT.md) |
+| 矩阵/线性代数：`torch.matmul`、`torch.linalg.*` | |
+| FFT：`torch.fft.*` | |
+| 神经网络算子：`torch.nn.functional.*` | |
+| 张量变形：`torch.reshape`、`torch.cat`、`torch.stack`、`torch.transpose` | |
+| 张量创建：`torch.zeros`、`torch.ones`、`torch.randn`（带 device 参数） | |
+| Tensor 方法：`Tensor.to`、`Tensor.view`、`Tensor.float` | |
+
+**判断方法**：API 的主要职责是**对张量数据做数值变换或构造**？是 → 本文；否 → 按类别查对应文档。
 
 ---
 

@@ -1,3 +1,7 @@
+## 分布式类 API UT 补充规范
+
+本文是 [SKILL.md](../SKILL.md) 的延伸，适用于**分布式**的 API。
+
 ## **路径命名**：覆盖主技能的规定（去掉前缀 `torch.distributed` 再转下划线）。例：`torch.distributed.all_reduce` → **`_all_reduce`**。
 
 ---
