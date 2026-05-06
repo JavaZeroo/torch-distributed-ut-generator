@@ -62,8 +62,8 @@ def _make_concrete_extension_cls():
 
 def _init_dist_hccl(rank, world_size):
     """Initialize distributed process with HCCL backend."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29511'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29511')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
     dist.init_process_group(backend='hccl', rank=rank, world_size=world_size)
@@ -71,9 +71,8 @@ def _init_dist_hccl(rank, world_size):
 
 def _test_fsdp_extensions_creation(rank, world_size, c2p):
     """Test FSDPExtensions subclass creation in multiprocess context."""
-    _init_dist_hccl(rank, world_size)
-
     try:
+        _init_dist_hccl(rank, world_size)
         cls = _make_concrete_extension_cls()
         ext = cls()
 
@@ -82,7 +81,8 @@ def _test_fsdp_extensions_creation(rank, world_size, c2p):
     except Exception as e:
         c2p.put((rank, 'error', str(e)))
     finally:
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 class TestFSDPExtensions(TestCase):

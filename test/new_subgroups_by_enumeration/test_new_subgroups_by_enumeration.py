@@ -35,8 +35,8 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 def _init_dist_hccl(rank, world_size):
     """Initialize distributed process with HCCL backend."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29512'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29512')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
     dist.init_process_group(backend='hccl', rank=rank, world_size=world_size)
@@ -44,9 +44,8 @@ def _init_dist_hccl(rank, world_size):
 
 def _test_new_subgroups_creation(rank, world_size, c2p):
     """Test new_subgroups_by_enumeration in multiprocess context."""
-    _init_dist_hccl(rank, world_size)
-
     try:
+        _init_dist_hccl(rank, world_size)
         # 把每个 rank 单独划成自己的子组
         ranks_per_subgroup = [[r] for r in range(world_size)]
         cur_subgroup, subgroups = dist.new_subgroups_by_enumeration(
@@ -55,11 +54,15 @@ def _test_new_subgroups_creation(rank, world_size, c2p):
 
         c2p.put((rank, 'subgroups_created', cur_subgroup is not None))
         c2p.put((rank, 'subgroups_count', len(subgroups)))
+        # cur_subgroup 应当只包含当前 rank：rank-in-subgroup == 0，size == 1
+        c2p.put((rank, 'cur_subgroup_size', dist.get_world_size(cur_subgroup)))
+        c2p.put((rank, 'cur_subgroup_rank', dist.get_rank(cur_subgroup)))
 
     except Exception as e:
         c2p.put((rank, 'error', str(e)))
     finally:
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 class TestNewSubgroupsByEnumeration(TestCase):
@@ -97,7 +100,7 @@ class TestNewSubgroupsByEnumeration(TestCase):
             ps.append(p)
 
         results = {}
-        for _ in range(world_size * 2):
+        for _ in range(world_size * 4):
             try:
                 rank, event, value = c2p.get(timeout=30)
                 if rank not in results:
@@ -112,7 +115,13 @@ class TestNewSubgroupsByEnumeration(TestCase):
 
         for rank in range(world_size):
             if rank in results:
+                self.assertNotIn('error', results[rank], f"rank {rank} reported: {results[rank].get('error')}")
                 self.assertTrue(results[rank].get('subgroups_created'))
+                # 子组数量应等于 ranks_per_subgroup_list 的长度
+                self.assertEqual(results[rank].get('subgroups_count'), world_size)
+                # 单 rank 子组：size == 1，rank-in-subgroup == 0
+                self.assertEqual(results[rank].get('cur_subgroup_size'), 1)
+                self.assertEqual(results[rank].get('cur_subgroup_rank'), 0)
 
 
 if __name__ == "__main__":

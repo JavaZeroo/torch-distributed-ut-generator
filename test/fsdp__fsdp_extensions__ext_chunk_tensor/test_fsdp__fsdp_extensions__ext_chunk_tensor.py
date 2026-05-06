@@ -36,8 +36,8 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 def _init_dist_hccl(rank, world_size):
     """Initialize distributed process with HCCL backend."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29507'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29507')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
     dist.init_process_group(backend='hccl', rank=rank, world_size=world_size)
@@ -45,9 +45,8 @@ def _init_dist_hccl(rank, world_size):
 
 def _test_ext_chunk_tensor(rank, world_size, c2p, device_name):
     """Test _ext_chunk_tensor in multiprocess context."""
-    _init_dist_hccl(rank, world_size)
-
     try:
+        _init_dist_hccl(rank, world_size)
         from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 
         tensor = torch.randn(10, 20, device=f"{device_name}:{rank}")
@@ -61,14 +60,23 @@ def _test_ext_chunk_tensor(rank, world_size, c2p, device_name):
             pg=pg,
         )
 
-        c2p.put((rank, 'chunked', True))
-        c2p.put((rank, 'chunked_is_tensor', isinstance(chunked, torch.Tensor)))
-        c2p.put((rank, 'chunked_dtype', str(chunked.dtype)))
+        # 收集多维信息以便父进程做严格断言
+        local_shards_count = -1
+        try:
+            local_shards_count = len(chunked.local_shards())
+        except AttributeError:
+            local_shards_count = -1
+
+        c2p.put((rank, 'is_tensor', isinstance(chunked, torch.Tensor)))
+        c2p.put((rank, 'dtype', str(chunked.dtype)))
+        c2p.put((rank, 'orig_dtype', str(tensor.dtype)))
+        c2p.put((rank, 'local_shards_count', local_shards_count))
 
     except Exception as e:
         c2p.put((rank, 'error', str(e)))
     finally:
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 class TestExtChunkTensor(TestCase):
@@ -121,7 +129,7 @@ class TestExtChunkTensor(TestCase):
             ps.append(p)
 
         results = {}
-        for _ in range(world_size * 3):
+        for _ in range(world_size * 4):
             try:
                 rank, event, value = c2p.get(timeout=30)
                 if rank not in results:
@@ -136,8 +144,12 @@ class TestExtChunkTensor(TestCase):
 
         for rank in range(world_size):
             if rank in results:
-                self.assertTrue(results[rank].get('chunked'))
-                self.assertTrue(results[rank].get('chunked_is_tensor'))
+                self.assertNotIn('error', results[rank], f"rank {rank} reported: {results[rank].get('error')}")
+                self.assertTrue(results[rank].get('is_tensor'))
+                # 默认实现返回 ShardedTensor，dtype 必须与输入一致
+                self.assertEqual(results[rank].get('dtype'), results[rank].get('orig_dtype'))
+                # ShardedTensor 在每个 rank 上至少有 1 个 local_shard
+                self.assertGreaterEqual(results[rank].get('local_shards_count'), 1)
 
 
 if __name__ == "__main__":

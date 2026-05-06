@@ -42,8 +42,8 @@ def _make_write_item(idx: int):
 
 def _init_dist_hccl(rank, world_size):
     """Initialize distributed process with HCCL backend."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29504'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29504')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
     dist.init_process_group(backend='hccl', rank=rank, world_size=world_size)
@@ -51,9 +51,8 @@ def _init_dist_hccl(rank, world_size):
 
 def _test_save_plan_creation(rank, world_size, c2p):
     """Test SavePlan creation in multiprocess context."""
-    _init_dist_hccl(rank, world_size)
-
     try:
+        _init_dist_hccl(rank, world_size)
         from torch.distributed.checkpoint import SavePlan
 
         items = [_make_write_item(i) for i in range(2)]
@@ -65,7 +64,8 @@ def _test_save_plan_creation(rank, world_size, c2p):
     except Exception as e:
         c2p.put((rank, 'error', str(e)))
     finally:
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 class TestSavePlan(TestCase):
