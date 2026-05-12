@@ -31,7 +31,7 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 def _test_backend_options_creation(rank, world_size, c2p):
     """Test TensorPipeRpcBackendOptions creation in multiprocess context."""
-    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
     torch_npu.npu.set_device(rank)
 
     try:

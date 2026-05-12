@@ -31,8 +31,8 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 def _init_and_destroy(rank, world_size, c2p):
     """Test destroy_process_group in multiprocess context."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29506'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29506')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
 

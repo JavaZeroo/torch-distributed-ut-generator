@@ -42,8 +42,8 @@ class TestDTensorLocalTensor(TestCase):
 
     @classmethod
     def _init_dist_hccl(cls, rank, world_size):
-        os.environ['MASTER_ADDR'] = '127.0.0.1'
-        os.environ['MASTER_PORT'] = '29503'
+        os.environ.setdefault('MASTER_ADDR', '127.0.0.1')
+        os.environ.setdefault('MASTER_PORT', '29503')
         os.environ['HCCL_WHITELIST_DISABLE'] = '1'
         torch_npu.npu.set_device(rank)
         dist.init_process_group(backend='hccl', world_size=world_size, rank=rank)

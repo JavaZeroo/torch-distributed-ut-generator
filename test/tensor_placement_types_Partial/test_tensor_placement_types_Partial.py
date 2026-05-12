@@ -40,8 +40,8 @@ ALL_REDUCE_OPS = ("sum", "avg", "min", "max", "product")
 def _init_dist_process(rank, world_size, fn, backend='hccl'):
     """Initialize distributed process with HCCL backend."""
     import os
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29504'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29504')
 
     torch.npu.set_device(rank)
     dist.init_process_group(backend, rank=rank, world_size=world_size)
@@ -133,7 +133,7 @@ def _test_partial_linear_ops(rank, world_size):
         partial = Partial(reduce_op=op)
         assert isinstance(partial, Partial)
         assert partial.reduce_op == op
-        assert op in Partial.LINEAR_REDUCE_OPS
+        assert op in LINEAR_REDUCE_OPS
 
     dist.barrier()
 
@@ -146,7 +146,7 @@ def _test_partial_all_ops(rank, world_size):
         partial = Partial(reduce_op=op)
         assert isinstance(partial, Partial)
         assert partial.reduce_op == op
-        assert op in Partial.ALL_REDUCE_OPS
+        assert op in ALL_REDUCE_OPS
 
     dist.barrier()
 

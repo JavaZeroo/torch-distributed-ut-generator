@@ -31,8 +31,8 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 def _init_dist_hccl(rank, world_size):
     """Initialize distributed process with HCCL backend."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29502'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29502')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
     dist.init_process_group(backend='hccl', rank=rank, world_size=world_size)

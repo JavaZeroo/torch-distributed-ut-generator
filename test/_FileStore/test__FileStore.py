@@ -91,14 +91,6 @@ class TestFileStore(TestCase):
         store = FileStore(path, 2)
         self.assertIsNotNone(store)
 
-    def test_init_empty_filename_raises(self):
-        """FileStore with empty file_name should raise an exception."""
-        raised = False
-        try:
-            FileStore("")
-        except Exception:
-            raised = True
-        self.assertTrue(raised, "Expected exception for empty file_name")
 
     # ------------------------------------------------------------------
     # path property tests

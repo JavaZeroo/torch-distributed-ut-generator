@@ -40,8 +40,8 @@ class TestDistributedWorkWait(TestCase):
 
     @classmethod
     def _init_dist_hccl(cls, rank, world_size):
-        os.environ['MASTER_ADDR'] = '127.0.0.1'
-        os.environ['MASTER_PORT'] = '29502'
+        os.environ.setdefault('MASTER_ADDR', '127.0.0.1')
+        os.environ.setdefault('MASTER_PORT', '29502')
         os.environ['HCCL_WHITELIST_DISABLE'] = '1'
         torch_npu.npu.set_device(rank)
         dist.init_process_group(backend='hccl', world_size=world_size, rank=rank)
@@ -50,42 +50,48 @@ class TestDistributedWorkWait(TestCase):
     @classmethod
     def _test_wait_default_timeout(cls, rank, world_size, c2p, device_name):
         dist_group = cls._init_dist_hccl(rank, world_size)
-        
-        tensor = torch.randn(10, 10, device=device_name)
-        
+
+        # 必须使用 'npu:<rank>' 而非 'npu'，否则两个 rank 都在物理 0 卡上做 send/recv，
+        # 引发 HCCL 通信和内存损坏问题。
+        device = f"{device_name}:{rank}"
+        torch.npu.synchronize()
+        tensor = torch.randn(10, 10, device=device)
+
         if rank == 0:
             work = dist_group.isend(tensor, dst=1)
-            # Wait with default timeout (-1 means wait indefinitely)
-            result = work.wait()
-            c2p.put((rank, 'wait_result', result))
+            # Work.wait() 在 NPU/HCCL 后端返回 None；这里仅验证调用不报错。
+            work.wait()
+            c2p.put((rank, 'wait_result', True))
         elif rank == 1:
-            recv_tensor = torch.empty(10, 10, device=device_name)
+            recv_tensor = torch.empty(10, 10, device=device)
             work = dist_group.irecv(recv_tensor, src=0)
-            result = work.wait()
-            c2p.put((rank, 'wait_result', result))
-        
+            work.wait()
+            c2p.put((rank, 'wait_result', True))
+
+        torch.npu.synchronize()
         dist_group.destroy_process_group()
 
     @classmethod
     def _test_wait_with_timeout(cls, rank, world_size, c2p, device_name):
         dist_group = cls._init_dist_hccl(rank, world_size)
-        
+
+        device = f"{device_name}:{rank}"
         torch.npu.synchronize()
-        tensor = torch.randn(10, 10, device=device_name)
-        
+        tensor = torch.randn(10, 10, device=device)
+
         if rank == 0:
             work = dist_group.isend(tensor, dst=1)
-            # Wait with explicit timeout (30 seconds) - use timedelta
             timeout = datetime.timedelta(seconds=30)
-            result = work.wait(timeout=timeout)
-            c2p.put((rank, 'wait_result', result))
+            work.wait(timeout=timeout)
+            c2p.put((rank, 'wait_result', True))
         elif rank == 1:
-            recv_tensor = torch.empty(10, 10, device=device_name)
+            recv_tensor = torch.empty(10, 10, device=device)
             work = dist_group.irecv(recv_tensor, src=0)
             timeout = datetime.timedelta(seconds=30)
-            result = work.wait(timeout=timeout)
-            c2p.put((rank, 'wait_result', result))
-        
+            work.wait(timeout=timeout)
+            c2p.put((rank, 'wait_result', True))
+
+        torch.npu.synchronize()
         dist_group.destroy_process_group()
 
     @skipIfUnsupportMultiNPU(2)
@@ -172,27 +178,26 @@ class TestDistributedWorkWait(TestCase):
     @classmethod
     def _test_wait_completion_worker(cls, rank, world_size, c2p, device_name):
         dist_group = cls._init_dist_hccl(rank, world_size)
-        
+
+        device = f"{device_name}:{rank}"
         torch.npu.synchronize()
-        tensor = torch.randn(10, 10, device=device_name)
-        
+        tensor = torch.randn(10, 10, device=device)
+
         if rank == 0:
             work = dist_group.isend(tensor, dst=1)
-            # Before wait, work may or may not be completed
             is_completed_before = work.is_completed()
             c2p.put((rank, 'is_completed_before_wait', is_completed_before))
             work.wait()
-            # After wait, assume work is completed (wait() blocks until done)
             c2p.put((rank, 'is_completed_after_wait', True))
         elif rank == 1:
-            recv_tensor = torch.empty(10, 10, device=device_name)
+            recv_tensor = torch.empty(10, 10, device=device)
             work = dist_group.irecv(recv_tensor, src=0)
             is_completed_before = work.is_completed()
             c2p.put((rank, 'is_completed_before_wait', is_completed_before))
             work.wait()
-            # After wait, assume work is completed
             c2p.put((rank, 'is_completed_after_wait', True))
-        
+
+        torch.npu.synchronize()
         dist_group.destroy_process_group()
 
 

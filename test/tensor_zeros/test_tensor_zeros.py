@@ -43,8 +43,8 @@ from torch_npu.testing.testcase import TestCase, run_tests
 
 
 def _init_dist(rank, world_size, fn, *args):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29500'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29500')
     torch.npu.set_device(rank)
     dist.init_process_group('hccl', rank=rank, world_size=world_size)
     try:

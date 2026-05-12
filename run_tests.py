@@ -33,6 +33,13 @@ def run_one(test_file: Path, root: Path, timeout: int) -> TestResult:
     rel = str(test_file.relative_to(root))
     result = TestResult(file=rel)
 
+    # 把 NPU 限定到 4,5 传给子进程（一段时间内观察这两张卡稳定空闲）。
+    # 必须在子进程 import torch_npu 之前注入，所以走 env 注入。
+    # 如其他用户占用了 4 / 5，可外部覆盖：
+    #   ASCEND_RT_VISIBLE_DEVICES=2,3 python run_tests.py
+    child_env = os.environ.copy()
+    child_env.setdefault('ASCEND_RT_VISIBLE_DEVICES', '4,5')
+
     t0 = time.monotonic()
     try:
         proc = subprocess.run(
@@ -48,6 +55,7 @@ def run_one(test_file: Path, root: Path, timeout: int) -> TestResult:
             text=True,
             timeout=timeout,
             cwd=str(root),
+            env=child_env,
         )
         elapsed = time.monotonic() - t0
         result.duration = elapsed

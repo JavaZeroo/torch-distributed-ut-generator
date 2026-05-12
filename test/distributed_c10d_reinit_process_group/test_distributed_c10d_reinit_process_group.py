@@ -35,8 +35,8 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 def _test_reinit_default_group(rank, world_size, c2p):
     """Test reinit_process_group(group=None) — default group, rebuild_link=True."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29518'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29518')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
 
@@ -56,8 +56,8 @@ def _test_reinit_default_group(rank, world_size, c2p):
 
 def _test_reinit_rebuild_false(rank, world_size, c2p):
     """Test reinit_process_group with rebuild_link=False — resume mode."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29518'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29518')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
 
@@ -76,8 +76,8 @@ def _test_reinit_rebuild_false(rank, world_size, c2p):
 
 def _test_reinit_explicit_group(rank, world_size, c2p):
     """Test reinit_process_group with explicit group argument."""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29518'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29518')
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)
 

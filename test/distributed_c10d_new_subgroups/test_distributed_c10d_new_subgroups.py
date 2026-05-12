@@ -30,20 +30,73 @@ API 签名：
      不做精度和数值正确性校验。
 """
 
+import fcntl
+import os
+import socket
+from datetime import timedelta
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from datetime import timedelta
 
 from torch_npu.testing.testcase import TestCase, run_tests
 from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 
+_HCCL_PORT_BASE = 50000
+_HCCL_PORT_RANGE = 12000
+_HCCL_PORT_PER_SPAWN = 512
+_HCCL_PORT_SLOTS = _HCCL_PORT_RANGE // _HCCL_PORT_PER_SPAWN
+_HCCL_PORT_COUNTER_FILE = '/tmp/_new_subgroups_hccl_port_counter'
+
+
+def _pick_free_port():
+    """Pick a free TCP port for torch.distributed rendezvous."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('', 0))
+        return sock.getsockname()[1]
+
+
+def _next_hccl_base_port():
+    """Return a fresh HCCL base port with enough room for subgroup PGs."""
+    try:
+        with open(_HCCL_PORT_COUNTER_FILE, 'a+') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.seek(0)
+                content = f.read().strip()
+                slot = int(content) if content else 0
+                slot = slot % _HCCL_PORT_SLOTS
+                next_slot = (slot + 1) % _HCCL_PORT_SLOTS
+                f.seek(0)
+                f.truncate()
+                f.write(str(next_slot))
+                return _HCCL_PORT_BASE + slot * _HCCL_PORT_PER_SPAWN
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except (OSError, ValueError):
+        slot = os.getpid() % _HCCL_PORT_SLOTS
+        return _HCCL_PORT_BASE + slot * _HCCL_PORT_PER_SPAWN
+
+
+def _spawn_dist_process(world_size, fn):
+    """Spawn HCCL ranks with isolated rendezvous and HCCL port ranges."""
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ['MASTER_PORT'] = str(_pick_free_port())
+    os.environ['HCCL_IF_BASE_PORT'] = str(_next_hccl_base_port())
+
+    mp.spawn(
+        _init_dist_process,
+        args=(world_size, fn),
+        nprocs=world_size,
+        join=True
+    )
+
+
 def _init_dist_process(rank, world_size, fn, backend='hccl'):
     """Initialize distributed process with HCCL backend."""
-    import os
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29506'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29506')
 
     torch.npu.set_device(rank)
     dist.init_process_group(backend, rank=rank, world_size=world_size)
@@ -55,12 +108,12 @@ def _init_dist_process(rank, world_size, fn, backend='hccl'):
 
 
 def _test_new_subgroups_default(rank, world_size):
-    """Test new_subgroups with default parameters."""
+    """Test new_subgroups with explicit group_size (NPU 后端不支持 default size)."""
     device = torch.device(f'npu:{rank}')
 
-    # Create subgroups with default parameters
-    # By default, creates intra-machine subgroups
-    subgroup, subgroups = dist.new_subgroups()
+    # NPU/HCCL backend does not support inferring group_size from CUDA-only
+    # device count, so an explicit group_size must be passed.
+    subgroup, subgroups = dist.new_subgroups(group_size=world_size)
 
     # Verify we got a subgroup
     assert subgroup is not None or len(subgroups) > 0, "Should get at least one subgroup"
@@ -201,89 +254,49 @@ class TestNewSubgroups(TestCase):
     def test_new_subgroups_default(self):
         """Test new_subgroups with default parameters."""
         world_size = 2
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_default),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_default)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_with_group_size(self):
         """Test new_subgroups with explicit group_size."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_with_group_size),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_with_group_size)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_with_explicit_group(self):
         """Test new_subgroups with explicit group."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_with_explicit_group),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_with_explicit_group)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_with_timeout(self):
         """Test new_subgroups with explicit timeout."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_with_timeout),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_with_timeout)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_with_backend(self):
         """Test new_subgroups with explicit backend."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_with_backend),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_with_backend)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_with_group_desc(self):
         """Test new_subgroups with group_desc."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_with_group_desc),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_with_group_desc)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_all_params(self):
         """Test new_subgroups with all parameters."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_all_params),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_all_params)
 
     @skipIfUnsupportMultiNPU(4)
     def test_new_subgroups_subgroup_ops(self):
         """Test operations on created subgroups."""
         world_size = 4
-        mp.spawn(
-            _init_dist_process,
-            args=(world_size, _test_new_subgroups_subgroup_ops),
-            nprocs=world_size,
-            join=True
-        )
+        _spawn_dist_process(world_size, _test_new_subgroups_subgroup_ops)
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
 
 
 def _init_dist_hccl(rank, world_size, port='29516'):
-    os.environ['MASTER_ADDR'] = '127.0.0.1'
+    os.environ.setdefault('MASTER_ADDR', '127.0.0.1')
     os.environ['MASTER_PORT'] = port
     os.environ['HCCL_WHITELIST_DISABLE'] = '1'
     torch_npu.npu.set_device(rank)

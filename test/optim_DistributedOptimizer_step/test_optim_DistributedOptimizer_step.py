@@ -43,8 +43,8 @@ except (ImportError, AttributeError):
 
 
 def _init_rpc(rank, world_size, fn, *args):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29501'
+    os.environ.setdefault('MASTER_ADDR', 'localhost')
+    os.environ.setdefault('MASTER_PORT', '29501')
     os.environ.setdefault('GLOO_SOCKET_IFNAME', 'lo')
     torch.npu.set_device(rank)
     warnings.filterwarnings('ignore', category=UserWarning)
